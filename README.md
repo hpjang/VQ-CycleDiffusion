@@ -22,29 +22,58 @@ not expected to produce identical checkpoints. The optimized S2T inference
 script removes one unused 30-step diffusion pass and reuses loaded models,
 while retaining each method's post-filter choice.
 
-## Quick start
+This is a documented reproduction release based on the [experiment author's
+repository](https://github.com/kusmin1363/VQ-CycleDiffusion). Its stage names
+follow that implementation, but the recommended CD trainer and S2T converter
+include the corrections and optimizations described above. The two releases
+should not be assumed to produce identical checkpoints.
+
+## Download pretrained assets
+
+The [pretrained weights and preprocessed four-speaker VCTK data](https://drive.google.com/drive/folders/1PPmIn9Jtu87OCe1UEYPxHUVqFwv862Ra?usp=sharing)
+are distributed separately from Git. Download them on the host, outside the
+checkout, using [gdown 6.2.0](https://github.com/wkentaro/gdown) and Python
+3.10 or newer. The Docker image uses Python 3.8, so do this before starting
+the container.
 
 ```bash
 git clone https://github.com/hpjang/VQ-CycleDiffusion.git
 cd VQ-CycleDiffusion
+python3 -m venv /absolute/path/to/gdown-venv  # python3 must be >= 3.10
+/absolute/path/to/gdown-venv/bin/python -m pip install 'gdown==6.2.0'
+ASSETS=/absolute/path/to/vq-assets
+/absolute/path/to/gdown-venv/bin/gdown --continue \
+  'https://drive.google.com/drive/folders/1PPmIn9Jtu87OCe1UEYPxHUVqFwv862Ra?usp=sharing' \
+  -O "$ASSETS"
+python3 scripts/setup_drive_assets.py --asset-root "$ASSETS"
+```
+
+The setup script checks the downloaded layout and creates ignored symlinks
+for the VCTK splits, speaker encoder, vocoder, supplied codebook files, and
+baseline `vc_255.pt`. It does not overwrite existing assets. The Drive folder does
+not contain `K=512` codebooks or counting maps; generate those before running
+the Table 9 CD setting. The historical CD fine-tuned checkpoints are also
+not included. See [Reproduction](docs/REPRODUCTION.md) for the exact layout,
+training stages, and split caveats.
+
+## Quick start
+
+```bash
 docker build -t vq-cyclediffusion .
 docker run --gpus all --rm -it --shm-size=8g \
   -v "$PWD:/workspace/VQ-CycleDiffusion" \
-  -v "/absolute/path/to/your/assets:/assets" \
+  -v "$ASSETS:$ASSETS:ro" \
   vq-cyclediffusion
 ```
 
-The commands below run from the repository root inside the container. Mount
-licensed data and trusted checkpoints into the container and arrange them as
-shown in [Reproduction](docs/REPRODUCTION.md).
+The asset mount must use the same absolute path on the host and in the
+container so the symlinks remain valid. The commands below run from the
+repository root inside the container, using the downloaded preprocessed data.
 
 ```bash
-python -m scripts.prepare_vctk \
-  --wav-root /assets/vctk_wavs --output /workspace/VQ-CycleDiffusion \
-  --speaker-encoder checkpts/spk_encoder/pretrained.pt \
-  --textgrid-root /assets/vctk_textgrids --with-mode-mels
-
-python -m train.init_codebook_stock_indv --spk p236 --size 512
+for spk in p236 p239 p259 p263; do
+  python -m train.init_codebook_stock_indv --spk "$spk" --size 512
+done
 python -m train.counting_map_script --size 512 \
   --out_dir mappings/512/indv2indv_count
 python -m train.train_decoder_cycle_indv --size 512 --batch_size 1
@@ -70,6 +99,7 @@ other size or training run.
 | `train/` | Codebook initialization, count maps, and fine-tuning variants |
 | `convert/` | Original seven transformation and conversion scripts |
 | `scripts/prepare_vctk.py` | VCTK split, mel and speaker embeddings, optional phone-mode targets |
+| `scripts/setup_drive_assets.py` | Validate and link the separately downloaded Drive assets |
 | `scripts/convert_cd.py` | Optimized, reusable S2T-HF/S2T-WS batch inference for Table 9 CD |
 | `speaker_encoder/`, `hifi-gan/` | Third-party speaker encoder and vocoder source |
 | `legacy/` | Historical CD fine-tuning script kept for audit |

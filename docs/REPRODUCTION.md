@@ -6,25 +6,96 @@ MCD environment may differ. Do not mix means from different package versions.
 
 ## Assets
 
-Obtain VCTK recordings and forced alignments under their own licenses. The
-paper uses speakers `p236`, `p239`, `p259`, and `p263`. Place trusted assets in
-these untracked paths:
+The experiment author's [repository](https://github.com/kusmin1363/VQ-CycleDiffusion)
+describes the original staged workflow. A separately hosted [Drive asset
+folder](https://drive.google.com/drive/folders/1PPmIn9Jtu87OCe1UEYPxHUVqFwv862Ra?usp=sharing)
+contains pretrained weights and preprocessed VCTK arrays. Its top level was
+checked when this guide was written:
 
 ```text
 checkpts/spk_encoder/pretrained.pt
 hifi-gan/generator_universal.pth
-log/log_Gunhee/vc_255.pt
+log/codebook_stock_255_exclude/{global,p236_exclude,p239_exclude,p259_exclude,p263_exclude}/
+VCTK_2F2M/{wavs,mels,mels_mode,embeds,textgrids,txt}/
+VCTK_2F2M_{train,valid,test}/{wavs,mels,mels_mode,embeds,textgrids,txt}/
+vc_255.pt
+```
+
+The top-level `vc_255.pt` is the pretrained CycleDiffusion backbone. The code
+expects it at `log/log_Gunhee/vc_255.pt`. The downloaded `log/` contains stock
+codebooks, not that nested backbone path. `scripts/setup_drive_assets.py`
+creates the required link. It links the supplied codebook **files** into a
+local `log/` directory so new `K=512` codebooks and training checkpoints can
+be written without changing the downloaded assets.
+
+Download with [gdown 6.2.0](https://github.com/wkentaro/gdown) on the host.
+This version requires Python 3.10 or newer; older gdown releases can fail
+on folders containing more than 50 files. The model Docker image remains
+Python 3.8. Use a host-side Python 3.10+ interpreter, and choose an asset
+directory outside the Git checkout:
+
+```bash
+python3 --version  # must be at least 3.10
+python3 -m venv /absolute/path/to/gdown-venv
+/absolute/path/to/gdown-venv/bin/python -m pip install 'gdown==6.2.0'
+ASSETS=/absolute/path/to/vq-assets
+/absolute/path/to/gdown-venv/bin/gdown --continue \
+  'https://drive.google.com/drive/folders/1PPmIn9Jtu87OCe1UEYPxHUVqFwv862Ra?usp=sharing' \
+  -O "$ASSETS"
+python3 scripts/setup_drive_assets.py --asset-root "$ASSETS"
+```
+
+The `-O` path has no trailing slash so its contents go directly into
+`$ASSETS`, without an extra `checkpoints/` directory. `--continue` skips
+completed files and resumes partial ones. The command can take a long time
+because the VCTK folders contain many files. Do not commit these assets;
+weights and data are excluded by `.gitignore`. If download access fails,
+check sharing permissions in a browser. Do not disable TLS verification.
+
+Inside Docker, mount the checkout and the asset directory at the same
+absolute asset path. This preserves the host-created symlink targets while
+keeping downloaded files read-only:
+
+```bash
+docker build -t vq-cyclediffusion .
+docker run --gpus all --rm -it --shm-size=8g \
+  -v "$PWD:/workspace/VQ-CycleDiffusion" \
+  -v "$ASSETS:$ASSETS:ro" \
+  vq-cyclediffusion
+```
+
+Verify the links inside the container:
+
+```bash
+test -f checkpts/spk_encoder/pretrained.pt
+test -f hifi-gan/generator_universal.pth
+test -f log/log_Gunhee/vc_255.pt
+test -d VCTK_2F2M_train/mels
+test -d VCTK_2F2M_valid/wavs
+```
+
+The Table 9 S2T-HF/S2T-WS setting needs these **additional generated paths**
+for `K=512`:
+
+```text
 log/codebook_stock_255_exclude/<spk>_exclude/codebook_stock_<spk>_<K>.pt
-log/codebook_stock_255_exclude/global/codebook_stock_<K>.pt
 mappings/<K>/indv2indv_count/count_matrix_<src>_to_<tgt>.pt
-mappings/<K>/count_matrix_<spk>_to_global.pt
 log/Decoder_cycle_only_10.0/local/<K>_diff_1e-08/<spk>/best_model.pt
 ```
 
-The original implementation's [README](https://github.com/kusmin1363/VQ-CycleDiffusion)
-links a previously distributed asset collection. Its current accessibility and
-redistribution terms have not been verified for this release. Never load an
-untrusted PyTorch checkpoint: historical `torch.load` can execute pickle code.
+The U2T and S2U2T variants additionally need
+`log/codebook_stock_255_exclude/global/codebook_stock_<K>.pt` and
+`mappings/<K>/count_matrix_<spk>_to_global.pt`.
+
+The inspected Drive codebook folders contain speaker-specific `K=4096` and
+`K=8192` weights; the global folder also contains `K=16384`. They do **not**
+contain `K=512` stock codebooks, count maps, or the CD fine-tuned decoder
+checkpoints. Follow the codebook, mapping, and CD training steps below for
+Table 9. Providing this asset link does not imply that the submitted CD
+checkpoint or its reported scores can be reproduced bit-for-bit with the
+corrected trainer. Obtain and use VCTK data under its own terms. Never load
+an untrusted PyTorch checkpoint: historical `torch.load` can execute pickle
+code.
 
 ## Data preparation
 
@@ -35,6 +106,10 @@ grid uses the directory named `VCTK_2F2M_valid` for the 30 evaluation WAVs;
 this split-name versus manuscript-test-label mismatch must be resolved in any
 publication claim. Verify actual counts,
 exception files, and the generated `split_manifest.csv` before fitting.
+
+If you downloaded the preprocessed split folders above, skip
+`scripts.prepare_vctk`. That command is only for reconstructing arrays from
+raw WAVs and TextGrids:
 
 ```bash
 python -m scripts.prepare_vctk --wav-root /assets/vctk_wavs --output . \
@@ -50,6 +125,18 @@ reconstruction, not a verified byte-for-byte copy of the original arrays.
 The four-speaker data alone does not regenerate the pretrained CycleDiffusion
 backbone: `train_cyclediffusion_enc.py` expects broader VCTK data. Use the
 exact `vc_255.pt` for strict checkpoint-dependent replication.
+
+## Workflow and checkpoints
+
+The original implementation organizes work as baseline encoder/decoder
+training, k-means codebook initialization, optional codebook or joint updates,
+count-map construction, diffusion fine-tuning, conversion, and scoring. This
+release provides those entry points, but the Table 9 CD workflow starts from
+the downloaded `vc_255.pt` instead of retraining the baseline. It initializes
+four `K=512` speaker codebooks, builds direct source-to-target count maps,
+fine-tunes the diffusion decoder only, and then converts with S2T-HF or
+S2T-WS. Do not confuse the downloaded backbone checkpoint with a CD
+fine-tuned checkpoint.
 
 ## Codebooks and count maps
 
