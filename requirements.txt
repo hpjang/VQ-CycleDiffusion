@@ -1,0 +1,17 @@
+# Python 3.8; install the CUDA-matched PyTorch stack separately or use Docker.
+einops==0.3.0
+librosa==0.9.2
+numpy==1.21.6
+scikit-learn==1.0.2
+scipy==1.7.3
+soundfile==0.13.1
+tgt==1.5
+tqdm==4.67.1
+pymcd==0.2.1
+pyworld==0.3.4
+pysptk==1.0.1
+fastdtw==0.3.4
+webrtcvad==2.0.10
+umap-learn==0.5.5
+visdom==0.2.4
+
