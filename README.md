@@ -30,7 +30,7 @@ should not be assumed to produce identical checkpoints.
 
 ## Download pretrained assets
 
-The [pretrained weights and preprocessed four-speaker VCTK data](https://drive.google.com/drive/folders/1PPmIn9Jtu87OCe1UEYPxHUVqFwv862Ra?usp=sharing)
+The [pretrained weights and preprocessed four-speaker VCTK data](https://drive.google.com/drive/folders/165Y5OZqV2XXWRX_XqTtytrv03aCspOpQ?usp=sharing)
 are distributed separately from Git. Download them on the host, outside the
 checkout, using [gdown 6.2.0](https://github.com/wkentaro/gdown) and Python
 3.10 or newer. The Docker image uses Python 3.8, so do this before starting
